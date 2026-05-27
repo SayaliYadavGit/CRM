@@ -70,3 +70,21 @@ path produces. No data migration is needed when we switch back.
 ## Environment variables required
 
 ### During bridge (cowork mode)
+## Migration to new Supabase (current session)
+
+Project migrated from Lovable Cloud Supabase (owametghzownzrfbinnm) to a
+fresh Supabase project (vyumjlvwohnwrbwffmzo) under personal account.
+Old project preserved but no longer in use.
+
+Reason: Lovable Cloud project's service-role key was hard to retrieve
+cleanly, blocking Cowork bridge setup. Fresh project gave clean control
+over auth, keys, and ownership.
+
+Schema reapplied via supabase db push. Data NOT migrated — fresh start
+with new companies + future leads.
+
+Auth: email confirmation disabled (internal tool, @qitt.ae restricted).
+Users created manually via Supabase Studio with Auto Confirm.
+
+Service-role key rotation schedule still applies (Day 7, 14, 21).
+Ownership transfer to QITT org account TBD before bridge ends.
