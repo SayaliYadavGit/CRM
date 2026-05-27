@@ -1,28 +1,55 @@
-import { supabase } from "@/integrations/supabase/client";
-import type { QueueItem, Stage } from "./types";
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import type { Stage } from "./types";
 import { researchCompany } from "./research.functions";
 import type { Dossier } from "./research-prompt";
-
-/**
- * Real AI research first; deterministic mock as a fallback so the demo never blocks.
- * The real engine is GPT-5.5 + web search + 7-rule prompt validated on Häfele.
- */
 
 // ─────────────────────────────────────────────────────────────
 // BRIDGE MODE FLAG
 // ─────────────────────────────────────────────────────────────
 // 'cowork' = pause the OpenAI engine; leads just queue until
 //            Cowork on Minakshi's Mac researches them and POSTs
-//            results to the cowork-bridge endpoint.
-// 'openai' = original yesterday's flow; queue submission auto-
-//            triggers OpenAI research (default).
+//            results to cowork-bridge.
+// 'openai' = original flow; queue submission auto-triggers OpenAI.
 //
-// See BRIDGE_MODE.md for switch-back instructions.
+// Read inside the handler (not at module load) so Cloudflare's
+// runtime env is available. See BRIDGE_MODE.md for switch-back.
 // ─────────────────────────────────────────────────────────────
-const RESEARCH_MODE = (
-  typeof process !== "undefined" ? process.env.RESEARCH_MODE : undefined
-) ?? "openai";
+function getResearchMode(): "cowork" | "openai" {
+  const raw = process.env.RESEARCH_MODE;
+  return raw === "cowork" ? "cowork" : "openai";
+}
 
+// ─────────────────────────────────────────────────────────────
+// Input schema for the server function
+// ─────────────────────────────────────────────────────────────
+const RunResearchInputSchema = z.object({
+  queue_id: z.string().uuid(),
+});
+
+const RerunResearchInputSchema = z.object({
+  company_id: z.string().uuid(),
+});
+
+// ─────────────────────────────────────────────────────────────
+// Helper: fetch the queue row for a given id
+// ─────────────────────────────────────────────────────────────
+async function fetchQueueItem(queueId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("queue")
+    .select("*")
+    .eq("id", queueId)
+    .maybeSingle();
+  if (error || !data) {
+    throw new Error(`Queue item not found: ${queueId}`);
+  }
+  return data;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Research call: real engine first, mock fallback if it fails
+// ─────────────────────────────────────────────────────────────
 async function getResearch(item: {
   company_name: string;
   location: string | null;
@@ -47,9 +74,11 @@ async function getResearch(item: {
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Formatters: rich dossier → DB string shape
-// ──────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Formatters: rich Dossier → DB string shape
+// (Match cowork-bridge.functions.ts so output is identical
+//  whether OpenAI or Cowork did the research.)
+// ─────────────────────────────────────────────────────────────
 
 function formatProblemsForDb(problems: Dossier["problem_statements"]): string {
   return problems
@@ -87,17 +116,11 @@ function formatProcessAssessment(d: Dossier): string {
     .join("\n");
 }
 
-function formatDigitalMaturity(d: Dossier): string {
-  return d.digital_maturity.narrative;
-}
-
 function formatAiReadiness(d: Dossier): string {
   return `Appetite: ${d.ai_readiness.appetite}\n\n${d.ai_readiness.narrative}`;
 }
 
 function formatAiRecommendation(d: Dossier): string {
-  // The schema doesn't have ai_recommendation as a dedicated field, so we synthesise
-  // a summary from top_fits + gaps. Reps see this as the "what to do next" paragraph.
   const top = d.top_fits[0];
   const lead = top
     ? `Lead with ${top.product_name} against ${top.problem}. ${top.narrative}`
@@ -107,8 +130,6 @@ function formatAiRecommendation(d: Dossier): string {
 }
 
 function formatProductMappingForDb(mapping: Dossier["product_mapping"]) {
-  // Her UI expects this shape (matches the existing mock output):
-  // { product, problem, how, relevance, starter }
   return mapping.map((m) => ({
     product: m.product_name,
     problem: m.problem,
@@ -118,9 +139,9 @@ function formatProductMappingForDb(mapping: Dossier["product_mapping"]) {
   }));
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Mock fallback (kept lean — only triggers if real AI fails)
-// ──────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Mock fallback — leaner than before, only fires if real AI fails
+// ─────────────────────────────────────────────────────────────
 
 function hash(s: string) {
   let h = 2166136261;
@@ -187,276 +208,271 @@ function buildMockResearch(item: { company_name: string; location: string | null
   };
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Main pipeline: queue → company + contacts + outreach
-// ──────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// MAIN SERVER FUNCTION: runMockResearch
+// Called by the queue page after a lead is submitted.
+// ─────────────────────────────────────────────────────────────
 
-export async function runMockResearch(item: QueueItem) {
-  // BRIDGE MODE: when in cowork mode, do not run any AI here.
-  // Leave the queue row as 'pending'. Cowork on Minakshi's Mac
-  // will pick it up and POST results to /cowork-bridge.
-  if (RESEARCH_MODE === "cowork") {
+export const runMockResearch = createServerFn({ method: "POST" })
+  .inputValidator((d) => RunResearchInputSchema.parse(d))
+  .handler(async ({ data }) => {
+    const mode = getResearchMode();
     console.log(
-      `[bridge] Queued for Cowork research: ${item.company_name} (${item.location ?? "no location"})`,
+      `[pipeline] runMockResearch called for queue_id=${data.queue_id}, mode=${mode}`,
     );
-    return { id: item.id, mode: "cowork" as const };
-  }
 
-  // OPENAI MODE: original yesterday's flow continues below.
-  await supabase.from("queue").update({ status: "processing" }).eq("id", item.id);
+    // ─────────────────────────────────────────────────────────
+    // BRIDGE MODE: no AI, no DB access. The queue row is already
+    // pending (created by the client when the user submitted).
+    // Cowork will pick it up and POST results to cowork-bridge.
+    // ─────────────────────────────────────────────────────────
+    if (mode === "cowork") {
+      console.log(`[bridge] Queued for Cowork research: queue_id=${data.queue_id}`);
+      return { id: data.queue_id, mode: "cowork" as const };
+    }
 
-  const { dossier, model } = await getResearch({
-    company_name: item.company_name,
-    location: item.location,
-    contact_name: item.contact_name,
-    contact_title: item.contact_title,
-    notes: item.notes,
-  });
+    // ─────────────────────────────────────────────────────────
+    // OPENAI MODE: fetch queue row, run AI, write results
+    // ─────────────────────────────────────────────────────────
+    const item = await fetchQueueItem(data.queue_id);
 
-  // Build the row payload for `companies`. Source: real dossier or mock fallback.
-  let companyPayload: Record<string, unknown>;
-  let contactsToInsert: Array<Record<string, unknown>> = [];
-  let outreachToInsert: Array<Record<string, unknown>> = [];
-  let outreachOrderToInsert: Array<Record<string, unknown>> = [];
-
-  if (dossier) {
-    // Real AI path
-    companyPayload = {
-      industry: dossier.industry,
-      confidence: dossier.overall_confidence,
-      priority: dossier.priority_recommendation,
-      relevant_products: dossier.relevant_products,
-      industry_profile: formatCompanyOverview(dossier),
-      process_assessment: formatProcessAssessment(dossier),
-      digital_maturity_rating: dossier.digital_maturity.rating,
-      digital_maturity: formatDigitalMaturity(dossier),
-      ai_readiness: formatAiReadiness(dossier),
-      problem_statements: formatProblemsForDb(dossier.problem_statements),
-      product_mapping_table: JSON.stringify(formatProductMappingForDb(dossier.product_mapping)),
-      top_fits: formatTopFitsForDb(dossier.top_fits),
-      ai_recommendation: formatAiRecommendation(dossier),
-    };
-
-    contactsToInsert = dossier.contacts.map((c) => ({
-      name: c.name,
-      title: c.title,
-      department: c.department,
-      linkedin: c.linkedin_url,
-      twitter: c.twitter,
-      found_on: c.found_on,
-      profile: c.profile,
-      recent_activity: c.recent_activity,
-      why: c.why_this_person,
-      outreach_angle: c.outreach_angle,
-      source: c.source_url,
-      // Email/phone come from the provided contact (Jihal) if any; otherwise AI doesn't
-      // produce email/phone for cold-discovered contacts.
-      email:
-        c.found_on?.toLowerCase().includes("provided") && item.contact_email
-          ? item.contact_email
-          : null,
-      phone:
-        c.found_on?.toLowerCase().includes("provided") && item.contact_phone
-          ? item.contact_phone
-          : null,
-    }));
-
-    outreachToInsert = dossier.outreach_drafts.map((o) => {
-      // Find the matching contact to grab their department.
-      const matchingContact = dossier.contacts.find((c) => c.name === o.contact_name);
-      return {
-        contact_name: o.contact_name,
-        department: matchingContact?.department ?? "Unknown",
-        linkedin_connect: o.linkedin_connect,
-        linkedin_followup: o.linkedin_followup,
-        email_subject: o.email_subject,
-        email_body: o.email_body,
-      };
+    await supabaseAdmin.from("queue").update({ status: "processing" }).eq("id", item.id);
+    const { dossier, model } = await getResearch({
+      company_name: item.company_name,
+      location: item.location,
+      contact_name: item.contact_name,
+      contact_title: item.contact_title,
+      notes: item.notes,
     });
 
-    outreachOrderToInsert = dossier.outreach_order.map((o) => ({
-      rank: o.rank,
-      contact_name: o.name,
-      reason: o.reason,
-    }));
-  } else {
-    // Mock fallback path
-    const m = buildMockResearch(item);
-    companyPayload = {
-      industry: m.industry,
-      confidence: m.confidence,
-      priority: m.priority,
-      relevant_products: m.products,
-      industry_profile: m.industry_profile,
-      process_assessment: m.process_assessment,
-      digital_maturity_rating: m.digital_maturity_rating,
-      digital_maturity: m.digital_maturity,
-      ai_readiness: m.ai_readiness,
-      problem_statements: m.problem_statements,
-      product_mapping_table: JSON.stringify(m.product_mapping_table),
-      top_fits: m.top_fits,
-      ai_recommendation: m.ai_recommendation,
-    };
+    let companyPayload: Record<string, unknown>;
+    let contactsToInsert: Array<Record<string, unknown>> = [];
+    let outreachToInsert: Array<Record<string, unknown>> = [];
+    let outreachOrderToInsert: Array<Record<string, unknown>> = [];
 
-    contactsToInsert = [
-      {
-        name: item.contact_name || "HSE Manager",
-        title: item.contact_title || "HSE Manager",
-        department: "HSE",
-        linkedin: null,
-        found_on: item.contact_name ? "Provided by user" : "Inferred",
-        profile: `${item.contact_title ?? "HSE Manager"} at ${item.company_name}.`,
-        recent_activity: null,
-        why: "Direct decision-maker for safety tooling.",
-        outreach_angle: "Open with paperwork burden and audit readiness.",
-        source: null,
-        email: item.contact_email ?? null,
-        phone: item.contact_phone ?? null,
-      },
-    ];
+    if (dossier) {
+      companyPayload = {
+        industry: dossier.industry,
+        confidence: dossier.overall_confidence,
+        priority: dossier.priority_recommendation,
+        relevant_products: dossier.relevant_products,
+        industry_profile: formatCompanyOverview(dossier),
+        process_assessment: formatProcessAssessment(dossier),
+        digital_maturity_rating: dossier.digital_maturity.rating,
+        digital_maturity: dossier.digital_maturity.narrative,
+        ai_readiness: formatAiReadiness(dossier),
+        problem_statements: formatProblemsForDb(dossier.problem_statements),
+        product_mapping_table: JSON.stringify(formatProductMappingForDb(dossier.product_mapping)),
+        top_fits: formatTopFitsForDb(dossier.top_fits),
+        ai_recommendation: formatAiRecommendation(dossier),
+      };
 
-    outreachToInsert = [
-      {
-        contact_name: contactsToInsert[0].name,
-        department: "HSE",
-        linkedin_connect: `Hi ${String(contactsToInsert[0].name).split(" ")[0]} — keen to compare notes on HSE workflow challenges in ${item.location ?? "the region"}.`,
-        linkedin_followup: `Thanks for connecting. Three things teams in your position usually want to fix: paperwork burden on PTW and inspections, shift handovers losing context, and audits taking weeks. Open to 15 min to compare notes?`,
-        email_subject: `${item.company_name} — HSE workflow burden`,
-        email_body: `Hi — reaching out because ${item.company_name} fits a pattern we see often in this sector. Three pain points keep surfacing: paper PTW, audit prep, shift handovers. Worth 15 minutes to compare what's working for peers?\n\nWarm regards,\nMinakshi Shrimalve\nProduct Director, QITT Solutions`,
-      },
-    ];
+      contactsToInsert = dossier.contacts.map((c) => ({
+        name: c.name,
+        title: c.title,
+        department: c.department,
+        linkedin: c.linkedin_url,
+        twitter: c.twitter,
+        found_on: c.found_on,
+        profile: c.profile,
+        recent_activity: c.recent_activity,
+        why: c.why_this_person,
+        outreach_angle: c.outreach_angle,
+        source: c.source_url,
+        email:
+          c.found_on?.toLowerCase().includes("provided") && item.contact_email
+            ? item.contact_email
+            : null,
+        phone:
+          c.found_on?.toLowerCase().includes("provided") && item.contact_phone
+            ? item.contact_phone
+            : null,
+      }));
 
-    outreachOrderToInsert = [
-      {
-        rank: 1,
-        contact_name: contactsToInsert[0].name,
-        reason: "Primary contact provided / inferred decision-maker.",
-      },
-    ];
-  }
+      outreachToInsert = dossier.outreach_drafts.map((o) => {
+        const matchingContact = dossier.contacts.find((c) => c.name === o.contact_name);
+        return {
+          contact_name: o.contact_name,
+          department: matchingContact?.department ?? "Unknown",
+          linkedin_connect: o.linkedin_connect,
+          linkedin_followup: o.linkedin_followup,
+          email_subject: o.email_subject,
+          email_body: o.email_body,
+        };
+      });
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Write to DB: upsert company, then insert contacts/outreach/order
-  // ────────────────────────────────────────────────────────────────────────────
+      outreachOrderToInsert = dossier.outreach_order.map((o) => ({
+        rank: o.rank,
+        contact_name: o.name,
+        reason: o.reason,
+      }));
+    } else {
+      const m = buildMockResearch(item);
+      companyPayload = {
+        industry: m.industry,
+        confidence: m.confidence,
+        priority: m.priority,
+        relevant_products: m.products,
+        industry_profile: m.industry_profile,
+        process_assessment: m.process_assessment,
+        digital_maturity_rating: m.digital_maturity_rating,
+        digital_maturity: m.digital_maturity,
+        ai_readiness: m.ai_readiness,
+        problem_statements: m.problem_statements,
+        product_mapping_table: JSON.stringify(m.product_mapping_table),
+        top_fits: m.top_fits,
+        ai_recommendation: m.ai_recommendation,
+      };
 
-  const { data: existing } = await supabase
-    .from("companies")
-    .select("id, stage")
-    .ilike("name", item.company_name)
-    .ilike("location", item.location ?? "")
-    .maybeSingle();
+      contactsToInsert = [
+        {
+          name: item.contact_name || "HSE Manager",
+          title: item.contact_title || "HSE Manager",
+          department: "HSE",
+          linkedin: null,
+          found_on: item.contact_name ? "Provided by user" : "Inferred",
+          profile: `${item.contact_title ?? "HSE Manager"} at ${item.company_name}.`,
+          recent_activity: null,
+          why: "Direct decision-maker for safety tooling.",
+          outreach_angle: "Open with paperwork burden and audit readiness.",
+          source: null,
+          email: item.contact_email ?? null,
+          phone: item.contact_phone ?? null,
+        },
+      ];
 
-  let companyId: string;
+      outreachToInsert = [
+        {
+          contact_name: contactsToInsert[0].name,
+          department: "HSE",
+          linkedin_connect: `Hi ${String(contactsToInsert[0].name).split(" ")[0]} — keen to compare notes on HSE workflow challenges in ${item.location ?? "the region"}.`,
+          linkedin_followup: `Thanks for connecting. Three things teams in your position usually want to fix: paperwork burden on PTW and inspections, shift handovers losing context, and audits taking weeks. Open to 15 min to compare notes?`,
+          email_subject: `${item.company_name} — HSE workflow burden`,
+          email_body: `Hi — reaching out because ${item.company_name} fits a pattern we see often in this sector. Three pain points keep surfacing: paper PTW, audit prep, shift handovers. Worth 15 minutes to compare what's working for peers?\n\nWarm regards,\nMinakshi Shrimalve\nProduct Director, QITT Solutions`,
+        },
+      ];
 
-  if (existing) {
-    companyId = existing.id;
-    await supabase.from("companies").update(companyPayload).eq("id", companyId);
-    // Replace contacts and outreach for re-runs (clean slate)
-    await supabase.from("contacts").delete().eq("company_id", companyId);
-    await supabase.from("outreach").delete().eq("company_id", companyId);
-    await supabase.from("outreach_order").delete().eq("company_id", companyId);
-  } else {
-    const { data: created, error } = await supabase
+      outreachOrderToInsert = [
+        {
+          rank: 1,
+          contact_name: contactsToInsert[0].name,
+          reason: "Primary contact provided / inferred decision-maker.",
+        },
+      ];
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // Write to DB
+    // ─────────────────────────────────────────────────────────
+    const { data: existing } = await supabaseAdmin
       .from("companies")
-      .insert({
-        ...companyPayload,
-        name: item.company_name,
-        location: item.location,
-        stage: "researched" as Stage,
-        created_by: item.submitted_by,
-        assigned_email: item.submitted_email,
-      })
-      .select()
-      .single();
-    if (error || !created) throw error ?? new Error("Failed to create company");
-    companyId = created.id;
-  }
+      .select("id, stage")
+      .ilike("name", item.company_name)
+      .ilike("location", item.location ?? "")
+      .maybeSingle();
 
-  // Insert contacts (with company_id)
-  if (contactsToInsert.length > 0) {
-    await supabase
-      .from("contacts")
-      .insert(contactsToInsert.map((c) => ({ ...c, company_id: companyId })));
-  }
+    let companyId: string;
 
-  // Insert outreach drafts
-  if (outreachToInsert.length > 0) {
-    await supabase
-      .from("outreach")
-      .insert(outreachToInsert.map((o) => ({ ...o, company_id: companyId })));
-  }
+    if (existing) {
+      companyId = existing.id;
+      await supabaseAdmin.from("companies").update(companyPayload).eq("id", companyId);
+      await supabaseAdmin.from("contacts").delete().eq("company_id", companyId);
+      await supabaseAdmin.from("outreach").delete().eq("company_id", companyId);
+      await supabaseAdmin.from("outreach_order").delete().eq("company_id", companyId);
+    } else {
+      const { data: created, error: insertErr } = await supabaseAdmin
+        .from("companies")
+        .insert({
+          ...companyPayload,
+          name: item.company_name,
+          location: item.location,
+          stage: "researched" as Stage,
+          created_by: item.submitted_by,
+          assigned_email: item.submitted_email,
+        })
+        .select()
+        .single();
+      if (insertErr || !created) throw insertErr ?? new Error("Failed to create company");
+      companyId = created.id;
+    }
 
-  // Insert outreach order
-  if (outreachOrderToInsert.length > 0) {
-    await supabase
-      .from("outreach_order")
-      .insert(outreachOrderToInsert.map((o) => ({ ...o, company_id: companyId })));
-  }
+    if (contactsToInsert.length > 0) {
+      await supabaseAdmin
+        .from("contacts")
+        .insert(contactsToInsert.map((c) => ({ ...c, company_id: companyId })));
+    }
 
-  // Activity log
-  await supabase.from("activities").insert({
-    company_id: companyId,
-    type: "system",
-    content: existing
-      ? `AI research re-run (${model}).`
-      : `AI research completed (${model}).`,
-    user_email: item.submitted_email,
+    if (outreachToInsert.length > 0) {
+      await supabaseAdmin
+        .from("outreach")
+        .insert(outreachToInsert.map((o) => ({ ...o, company_id: companyId })));
+    }
+
+    if (outreachOrderToInsert.length > 0) {
+      await supabaseAdmin
+        .from("outreach_order")
+        .insert(outreachOrderToInsert.map((o) => ({ ...o, company_id: companyId })));
+    }
+
+    await supabaseAdmin.from("activities").insert({
+      company_id: companyId,
+      type: "system",
+      content: existing
+        ? `AI research re-run (${model}).`
+        : `AI research completed (${model}).`,
+      user_email: item.submitted_email,
+    });
+
+    await supabaseAdmin
+      .from("queue")
+      .update({ status: "done", company_id: companyId })
+      .eq("id", item.id);
+
+    return { id: companyId, mode: "openai" as const };
   });
 
-  // Mark queue done
-  await supabase.from("queue").update({ status: "done", company_id: companyId }).eq("id", item.id);
+// ─────────────────────────────────────────────────────────────
+// rerunResearchForCompany — same flow without going through queue
+// ─────────────────────────────────────────────────────────────
 
-  return { id: companyId };
-}
+export const rerunResearchForCompany = createServerFn({ method: "POST" })
+  .inputValidator((d) => RerunResearchInputSchema.parse(d))
+  .handler(async ({ data }) => {
+    const mode = getResearchMode();
 
-/**
- * Re-run research for an existing company. Same flow as the queue submission, just
- * without going through the queue table.
- */
-export async function rerunResearchForCompany(
-  companyId: string,
-  userEmail?: string | null,
-  userId?: string | null,
-) {
-  // BRIDGE MODE: re-runs also have to go through Cowork.
-  // We mark the company as 'needs research' and Cowork picks it up
-  // on its next run. (For v1 of the bridge we don't yet support
-  // re-runs — only initial research via the queue. Tell user.)
-  if (RESEARCH_MODE === "cowork") {
-    throw new Error(
-      "Re-running research is not available during bridge mode. " +
-        "Cowork researches via the queue. Add the company as a new queue entry to re-research.",
-    );
-  }
+    if (mode === "cowork") {
+      throw new Error(
+        "Re-running research is not available during bridge mode. " +
+          "Cowork researches via the queue. Add the company as a new queue entry to re-research.",
+      );
+    }
 
-  const { data: company } = await supabase
-    .from("companies")
-    .select("*")
-    .eq("id", companyId)
-    .single();
-  if (!company) throw new Error("Company not found");
+    const { data: company } = await supabaseAdmin
+      .from("companies")
+      .select("*")
+      .eq("id", data.company_id)
+      .single();
+    if (!company) throw new Error("Company not found");
 
-  // Build a synthetic queue item to reuse the same code path
-  const syntheticItem: QueueItem = {
-    id: "rerun-" + companyId,
-    company_name: company.name,
-    location: company.location,
-    contact_name: null,
-    contact_title: null,
-    contact_email: null,
-    contact_phone: null,
-    notes: null,
-    status: "processing",
-    submitted_by: userId ?? null,
-    submitted_email: userEmail ?? null,
-    has_card: false,
-    card_name: null,
-    card_data: null,
-    company_id: companyId,
-    created_at: new Date().toISOString(),
-  };
+    // Build a synthetic queue row in memory; run the same path
+    // (We use a fake queue row since the real flow needs one)
+    const tempQueueId = crypto.randomUUID();
+    const { error: queueErr } = await supabaseAdmin.from("queue").insert({
+      id: tempQueueId,
+      company_name: company.name,
+      location: company.location,
+      status: "processing",
+      submitted_by: null,
+      submitted_email: null,
+    });
+    if (queueErr) throw queueErr;
 
-  // Run the same pipeline (it will UPDATE the existing company since name+location match)
-  await runMockResearch(syntheticItem);
-  return companyId;
-}
+    try {
+      await runMockResearch({ data: { queue_id: tempQueueId } });
+    } finally {
+      // Clean up the synthetic queue row
+      await supabaseAdmin.from("queue").delete().eq("id", tempQueueId);
+    }
+
+    return { id: data.company_id };
+  });

@@ -42,9 +42,9 @@ function Page() {
     return () => { clearInterval(interval); supabase.removeChannel(ch); };
   }, [refetch]);
 
-  async function retry(q: QueueItem) {
+ async function retry(q: QueueItem) {
     await supabase.from("queue").update({ status: "pending" }).eq("id", q.id);
-    runMockResearch(q).catch(async (err) => {
+    runMockResearch({ data: { queue_id: q.id } }).catch(async (err) => {
       console.error(err);
       await supabase.from("queue").update({ status: "failed" }).eq("id", q.id);
       toast.error("Research failed again.");
@@ -90,8 +90,8 @@ function Page() {
     setForm({ company_name: "", location: "", contact_name: "", contact_title: "", contact_email: "", contact_phone: "", notes: "" });
     setHasCard(false); setCardName(null);
     setBusy(false);
-    toast.success("Submitted. AI research starting…");
-    runMockResearch(data).catch(async (err) => {
+   toast.success("Submitted. AI research starting…");
+    runMockResearch({ data: { queue_id: data.id } }).catch(async (err) => {
       console.error(err);
       await supabase.from("queue").update({ status: "failed" }).eq("id", data.id);
       toast.error("Research failed.");
