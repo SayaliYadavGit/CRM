@@ -31,3 +31,9 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Data files (imported via script, not source-controlled)
+data/
+
+# Supabase CLI temp files
+supabase/.temp/

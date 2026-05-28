@@ -104,8 +104,8 @@ function Page() {
   try { mapping = JSON.parse(company.product_mapping_table ?? "[]"); } catch {}
 
   return (
-    <div className="px-6 py-6 max-w-6xl mx-auto space-y-5">
-      <Link to="/opportunities" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3 w-3 mr-1" />Back</Link>
+<div className="px-6 py-6 max-w-screen-2xl mx-auto space-y-5">
+          <Link to="/opportunities" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3 w-3 mr-1" />Back</Link>
 
       <div className="qitt-card p-6 space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -173,28 +173,13 @@ function Page() {
       <Section title="Predicted Problem Statements" body={company.problem_statements} />
 
       <Collapsible title="QITT Product Relevance">
-        {mapping.length > 0 && (
-          <div className="overflow-hidden rounded border border-border mb-3">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/40 text-muted-foreground"><tr>
-                <th className="text-left p-2">Product</th><th className="text-left p-2">Problem</th>
-                <th className="text-left p-2">How it solves</th><th className="text-left p-2">Relevance</th>
-                <th className="text-left p-2">Starter</th>
-              </tr></thead>
-              <tbody>{mapping.map((m, i) => (
-                <tr key={i} className="border-t border-border">
-                  <td className="p-2 font-medium">{m.product}</td><td className="p-2">{m.problem}</td>
-                  <td className="p-2 text-muted-foreground">{m.how}</td>
-                  <td className="p-2"><span className="px-2 py-0.5 rounded text-[10px] bg-accent/15 text-accent">{m.relevance}</span></td>
-                  <td className="p-2 italic text-muted-foreground">"{m.starter}"</td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
+        {company.product_mapping_table && (
+          <div className="overflow-x-auto mb-3 [&_table]:w-full [&_table]:text-xs [&_table]:border-collapse [&_th]:text-left [&_th]:p-2 [&_th]:bg-muted/40 [&_th]:text-muted-foreground [&_th]:font-medium [&_th]:border-b [&_th]:border-border [&_td]:p-2 [&_td]:border-b [&_td]:border-border [&_tr:hover]:bg-muted/20" dangerouslySetInnerHTML={{ __html: company.product_mapping_table }} />
         )}
-        <div className="text-sm text-muted-foreground"><span className="text-foreground font-medium">Top fits: </span>{company.top_fits}</div>
+        {company.top_fits && (
+          <div className="text-sm text-muted-foreground mt-3 space-y-2 [&_h4]:text-foreground [&_h4]:font-semibold [&_h4]:text-sm [&_h4]:mt-3 [&_h4:first-child]:mt-0 [&_p]:mb-2" dangerouslySetInnerHTML={{ __html: company.top_fits }} />
+        )}
       </Collapsible>
-
       <Collapsible title={`Contacts (${contacts.length})`}>
         <div className="flex justify-end mb-3">
           <Button size="sm" variant="outline" onClick={() => setEditContact({ company_id: company.id, name: "" })}>
@@ -328,7 +313,10 @@ function Section({ title, body, chip }: { title: string; body?: string | null; c
   return (
     <Collapsible title={title}>
       {chip && <span className="inline-block text-[10px] px-2 py-1 rounded bg-accent/15 text-accent uppercase tracking-wider mb-2">{chip}</span>}
-      <p className="text-sm whitespace-pre-wrap text-muted-foreground">{body ?? "No data yet."}</p>
+{body
+        ? <div className="text-sm text-muted-foreground space-y-2 [&_h4]:text-foreground [&_h4]:font-semibold [&_h4]:text-xs [&_h4]:uppercase [&_h4]:tracking-wider [&_h4]:text-accent [&_h4]:mt-4 [&_h4:first-child]:mt-0 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_li]:text-sm [&_strong]:text-foreground [&_strong]:font-medium [&_blockquote]:border-l-2 [&_blockquote]:border-accent [&_blockquote]:pl-3 [&_blockquote]:py-1 [&_blockquote]:my-2 [&_blockquote]:bg-muted/20" dangerouslySetInnerHTML={{ __html: body }} />
+        : <p className="text-sm text-muted-foreground">No data yet.</p>
+      }
     </Collapsible>
   );
 }

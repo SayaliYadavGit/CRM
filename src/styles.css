@@ -1,7 +1,6 @@
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
-
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -54,7 +53,7 @@
   --color-dom-ops: var(--dom-ops);
   --color-dom-intel: var(--dom-intel);
 
-  --font-display: "Anton", "Inter", sans-serif;
+  --font-display: "Inter", "IBM Plex Sans Arabic", system-ui, sans-serif;
   --font-editorial: "Playfair Display", Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --font-sans: "Inter", "IBM Plex Sans Arabic", system-ui, sans-serif;
@@ -64,7 +63,7 @@
 :root, .dark {
   --radius: 0.625rem;
 
-  --background: oklch(0.18 0.030 240);          /* #0A1628 */
+  --background: oklch(0.16 0.035 250);          /* #0A1628 */
   --foreground: oklch(0.93 0.010 230);          /* #E8ECF1 */
   --card: oklch(0.22 0.035 240);                /* #142840 */
   --card-foreground: oklch(0.93 0.010 230);
@@ -99,7 +98,7 @@
   --gold-200: oklch(0.86 0.085 80);
   --gold-300: oklch(0.80 0.105 78);
   --gold-400: oklch(0.76 0.120 76);
-  --gold-500: oklch(0.72 0.130 75);
+  --gold-500: oklch(0.78 0.115 85);
   --gold-600: oklch(0.62 0.115 70);
   --gold-700: oklch(0.50 0.100 68);
   --gold-bg:  oklch(0.27 0.045 75);
@@ -172,7 +171,8 @@
   * { border-color: var(--color-border); }
   html, body { background-color: var(--color-background); color: var(--color-foreground); }
   body { font-family: var(--font-sans); }
-  h1, h2, h3, h4 { font-family: var(--font-sans); letter-spacing: -0.02em; }
+  h1, h2, h3, h4 { font-family: var(--font-sans); letter-spacing: -0.02em; font-weight: 700; }
+  .font-display { font-weight: 800; }
   .font-display { font-family: var(--font-display); letter-spacing: 0.01em; }
   .font-editorial { font-family: var(--font-editorial); }
   .font-mono { font-family: var(--font-mono); }
