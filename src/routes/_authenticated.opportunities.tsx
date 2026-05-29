@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { cn } from "@/lib/utils";
+import { cn, fmtRelative } from "@/lib/utils";
 import { toast } from "sonner";
 import { Download, Users, ArrowRightLeft, Archive } from "lucide-react";
 
@@ -200,6 +200,7 @@ const allSelected = items.length > 0 && items.every((c) => selected.has(c.id));
             <th className="px-3 py-3 w-8"><Checkbox checked={allSelected} onCheckedChange={onToggleAll} /></th>
             <th className="px-4 py-3 text-left">Stage</th>
             <th className="px-4 py-3 text-left">Company</th>
+            <th className="px-4 py-3 text-left">Added</th>
             <th className="px-4 py-3 text-left">Location</th>
             <th className="px-4 py-3 text-left">Industry</th>
             <th className="px-4 py-3 text-left">Products</th>
@@ -211,13 +212,14 @@ const allSelected = items.length > 0 && items.every((c) => selected.has(c.id));
         </thead>
         <tbody>
           {items.length === 0 && (
-            <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">No companies yet. Submit one in the Queue tab.</td></tr>
+            <tr><td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">No companies yet. Submit one in the Queue tab.</td></tr>
           )}
           {items.map((c) => (
             <tr key={c.id} className={cn("border-b border-border/50 hover:bg-muted/40", selected.has(c.id) && "bg-accent/5")}>
               <td className="px-3 py-3"><Checkbox checked={selected.has(c.id)} onCheckedChange={() => onToggle(c.id)} /></td>
               <td className="px-4 py-3"><StageBadge stage={c.stage} /></td>
               <td className="px-4 py-3"><Link to="/companies/$companyId" params={{ companyId: c.id }} className="font-medium hover:text-accent">{c.name}</Link></td>
+              <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap" title={c.created_at ? new Date(c.created_at).toLocaleString() : ""}>{fmtRelative(c.created_at)}</td>
               <td className="px-4 py-3 text-muted-foreground">{c.location ?? "—"}</td>
               <td className="px-4 py-3 text-muted-foreground">{c.industry ?? "—"}</td>
               <td className="px-4 py-3"><div className="flex flex-wrap gap-1">{(c.relevant_products ?? []).slice(0, 2).map((p) => <span key={p} className="text-[10px] px-2 py-0.5 rounded bg-teal-500/15 text-teal-400">{p}</span>)}</div></td>

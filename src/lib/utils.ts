@@ -10,7 +10,13 @@ export function fmtDate(d: string | Date | null | undefined) {
   const date = typeof d === "string" ? new Date(d) : d;
   return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
-
+export function fmtRelative(d: string | Date | null | undefined) {
+  if (!d) return "—";
+  const date = typeof d === "string" ? new Date(d) : d;
+  const now = new Date();
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString(undefined, sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" });
+}
 export function initials(name?: string | null) {
   if (!name) return "?";
   return name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
