@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       activities: {
@@ -72,10 +97,12 @@ export type Database = {
           id: string
           industry: string | null
           industry_profile: string | null
+          lead_source: string | null
           location: string | null
           lost_reason: string | null
           name: string
           priority: number | null
+          priority_tier: string | null
           problem_statements: string | null
           process_assessment: string | null
           product_mapping_table: string | null
@@ -97,10 +124,12 @@ export type Database = {
           id?: string
           industry?: string | null
           industry_profile?: string | null
+          lead_source?: string | null
           location?: string | null
           lost_reason?: string | null
           name: string
           priority?: number | null
+          priority_tier?: string | null
           problem_statements?: string | null
           process_assessment?: string | null
           product_mapping_table?: string | null
@@ -122,10 +151,12 @@ export type Database = {
           id?: string
           industry?: string | null
           industry_profile?: string | null
+          lead_source?: string | null
           location?: string | null
           lost_reason?: string | null
           name?: string
           priority?: number | null
+          priority_tier?: string | null
           problem_statements?: string | null
           process_assessment?: string | null
           product_mapping_table?: string | null
@@ -715,6 +746,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       activity_type: ["note", "stage_change", "system"],

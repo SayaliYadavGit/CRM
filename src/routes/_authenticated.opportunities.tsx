@@ -22,6 +22,16 @@ function Page() {
     },
   });
 
+  const { data: contactCounts = {} } = useQuery({
+    queryKey: ["contact-counts"],
+    queryFn: async (): Promise<Record<string, number>> => {
+      const { data } = await supabase.from("contacts").select("company_id");
+      const counts: Record<string, number> = {};
+      (data ?? []).forEach((c) => { counts[c.company_id] = (counts[c.company_id] ?? 0) + 1; });
+      return counts;
+    },
+  });
+
   useEffect(() => {
     const ch = supabase.channel("companies-list").on("postgres_changes", { event: "*", schema: "public", table: "companies" }, () => refetch()).subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -41,15 +51,36 @@ function Page() {
   }, [companies, q, stage]);
 
   const stats = useMemo(() => {
-    const open = companies.filter((c) => c.stage !== "won" && c.stage !== "lost");
     const total = companies.length;
-    const won = companies.filter((c) => c.stage === "won").length;
     const avg = total ? Math.round(companies.reduce((s, c) => s + (c.confidence ?? 0), 0) / total) : 0;
+
+    // Count total contacts across all companies (using the counts query from earlier)
+    const keyContacts = Object.values(contactCounts).reduce((sum, n) => sum + n, 0);
+
+    // Find the most common product across all companies' relevant_products arrays
+    const productCounts: Record<string, number> = {};
+    companies.forEach((c) => {
+      (c.relevant_products ?? []).forEach((p) => {
+        productCounts[p] = (productCounts[p] ?? 0) + 1;
+      });
+    });
+    const sortedProducts = Object.entries(productCounts).sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1]; // higher count wins
+      return a[0].localeCompare(b[0]); // alphabetical tiebreaker
+    });
+    const topProduct = sortedProducts[0];
+    const topProductName = topProduct ? topProduct[0].replace(/^NIZARA /i, "").replace(/\s*\(.*?\)/, "") : "—"; // strip "NIZARA " prefix + "(CAD2Quote)" suffix for compactness
+    const topProductCount = topProduct ? topProduct[1] : 0;
+
+    // Keep the old stats for the bulk action bar / export CSV in case they're used elsewhere
+    const open = companies.filter((c) => c.stage !== "won" && c.stage !== "lost");
+    const won = companies.filter((c) => c.stage === "won").length;
     const pipelineValue = open.reduce((s, c) => s + Number(c.deal_value ?? 0), 0);
     const weighted = open.reduce((s, c) => s + Number(c.deal_value ?? 0) * STAGE_PROBABILITY[c.stage], 0);
     const wonValue = companies.filter((c) => c.stage === "won").reduce((s, c) => s + Number(c.deal_value ?? 0), 0);
-    return { total, won, avg, pipelineValue, weighted, wonValue, open: open.length };
-  }, [companies]);
+
+    return { total, won, avg, pipelineValue, weighted, wonValue, open: open.length, keyContacts, topProductName, topProductCount };
+  }, [companies, contactCounts]);
 
   const fmtMoney = (n: number) => n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}K` : `${Math.round(n)}`;
 
@@ -85,12 +116,11 @@ function Page() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Stat label="Open deals" value={stats.open} />
-        <Stat label="Pipeline value" value={`AED ${fmtMoney(stats.pipelineValue)}`} />
-        <Stat label="Weighted forecast" value={`AED ${fmtMoney(stats.weighted)}`} accent />
-        <Stat label="Won (closed)" value={`AED ${fmtMoney(stats.wonValue)}`} />
-        <Stat label="Avg confidence" value={`${stats.avg}%`} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Stat label="Total Prospects" value={stats.total} sublabel="companies analysed" accent />
+        <Stat label="Key Contacts" value={stats.keyContacts} sublabel="across all companies" accent />
+        <Stat label="Avg Confidence" value={`${stats.avg}%`} sublabel="product-problem fit" accent />
+        <Stat label="Top Product Fit" value={stats.topProductName} sublabel={stats.topProductCount > 0 ? `${stats.topProductCount} companies` : "—"} accent />
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -131,30 +161,31 @@ function Page() {
         </div>
       )}
 
-      {view === "table" && <CompanyTable items={filtered} selected={selected} onToggle={(id) => {
+      {view === "table" && <CompanyTable items={filtered} contactCounts={contactCounts} selected={selected} onToggle={(id) => {
         const next = new Set(selected); next.has(id) ? next.delete(id) : next.add(id); setSelected(next);
       }} onToggleAll={() => setSelected(selected.size === filtered.length ? new Set() : new Set(filtered.map((c) => c.id)))} />}
-      {view === "industry" && <IndustryView items={filtered} />}
+        {view === "industry" && <IndustryView items={filtered} />}
       {view === "confidence" && <ConfidenceView items={filtered} />}
     </div>
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: React.ReactNode; accent?: boolean }) {
+function Stat({ label, value, sublabel, accent }: { label: string; value: React.ReactNode; sublabel?: string; accent?: boolean }) {
   return (
     <div className="qitt-card p-5">
       <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className={cn("qitt-stat-value mt-2", accent && "text-accent")}>{value}</div>
+      {sublabel && <div className="text-xs text-muted-foreground mt-1">{sublabel}</div>}
     </div>
   );
 }
 
-function CompanyTable({ items, selected, onToggle, onToggleAll }: { items: Company[]; selected: Set<string>; onToggle: (id: string) => void; onToggleAll: () => void }) {
-  const allSelected = items.length > 0 && items.every((c) => selected.has(c.id));
+function CompanyTable({ items, contactCounts, selected, onToggle, onToggleAll }: { items: Company[]; contactCounts: Record<string, number>; selected: Set<string>; onToggle: (id: string) => void; onToggleAll: () => void }) {
+const allSelected = items.length > 0 && items.every((c) => selected.has(c.id));
   return (
     <div className="qitt-card overflow-x-auto">
       <table className="w-full text-sm min-w-[900px]">
-        <thead className="text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
+       <thead className="text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
           <tr>
             <th className="px-3 py-3 w-8"><Checkbox checked={allSelected} onCheckedChange={onToggleAll} /></th>
             <th className="px-4 py-3 text-left">Stage</th>
@@ -163,12 +194,14 @@ function CompanyTable({ items, selected, onToggle, onToggleAll }: { items: Compa
             <th className="px-4 py-3 text-left">Industry</th>
             <th className="px-4 py-3 text-left">Products</th>
             <th className="px-4 py-3 text-left">Confidence</th>
+            <th className="px-4 py-3 text-left">Contacts</th>
+            <th className="px-4 py-3 text-left">Lead Source</th>
             <th className="px-4 py-3 text-left">Owner</th>
           </tr>
         </thead>
         <tbody>
           {items.length === 0 && (
-            <tr><td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">No companies yet. Submit one in the Queue tab.</td></tr>
+            <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">No companies yet. Submit one in the Queue tab.</td></tr>
           )}
           {items.map((c) => (
             <tr key={c.id} className={cn("border-b border-border/50 hover:bg-muted/40", selected.has(c.id) && "bg-accent/5")}>
@@ -179,6 +212,8 @@ function CompanyTable({ items, selected, onToggle, onToggleAll }: { items: Compa
               <td className="px-4 py-3 text-muted-foreground">{c.industry ?? "—"}</td>
               <td className="px-4 py-3"><div className="flex flex-wrap gap-1">{(c.relevant_products ?? []).slice(0, 2).map((p) => <span key={p} className="text-[10px] px-2 py-0.5 rounded bg-teal-500/15 text-teal-400">{p}</span>)}</div></td>
               <td className="px-4 py-3"><ConfidenceBar value={c.confidence ?? 0} /></td>
+              <td className="px-4 py-3 text-xs text-muted-foreground">{contactCounts[c.id] ?? 0}</td>
+              <td className="px-4 py-3 text-xs text-muted-foreground">{c.lead_source ?? "—"}</td>
               <td className="px-4 py-3 text-xs text-muted-foreground">{c.assigned_email?.split("@")[0] ?? "—"}</td>
             </tr>
           ))}
