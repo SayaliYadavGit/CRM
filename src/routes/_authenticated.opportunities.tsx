@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn, fmtRelative } from "@/lib/utils";
 import { toast } from "sonner";
-import { Download, Users, ArrowRightLeft, Archive } from "lucide-react";
+import { Download, Users, ArrowRightLeft, Archive, ChevronUp, ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/opportunities")({ component: Page });
 
@@ -40,21 +40,44 @@ function Page() {
     return () => { supabase.removeChannel(ch); };
   }, [refetch]);
 
-  const [q, setQ] = useState("");
+const [q, setQ] = useState("");
   const [stage, setStage] = useState<string>("all");
   const [view, setView] = useState<"table" | "industry" | "confidence">("table");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
-  const filtered = useMemo(() => {
-    return companies.filter((c) => {
+ const filtered = useMemo(() => {
+    const list = companies.filter((c) => {
       if (!showArchived && c.archived) return false;
       if (showArchived && !c.archived) return false;
       if (stage !== "all" && c.stage !== stage) return false;
       if (q && ![c.name, c.location, c.industry].some((x) => (x ?? "").toLowerCase().includes(q.toLowerCase()))) return false;
       return true;
     });
-  }, [companies, q, stage, showArchived]);
+
+    if (!sort) return list;
+
+    const sorted = [...list].sort((a, b) => {
+      let av: string | number = "";
+      let bv: string | number = "";
+      switch (sort.key) {
+        case "stage": av = a.stage; bv = b.stage; break;
+        case "company": av = (a.name ?? "").toLowerCase(); bv = (b.name ?? "").toLowerCase(); break;
+        case "added": av = a.created_at ? new Date(a.created_at).getTime() : 0; bv = b.created_at ? new Date(b.created_at).getTime() : 0; break;
+        case "location": av = (a.location ?? "").toLowerCase(); bv = (b.location ?? "").toLowerCase(); break;
+        case "industry": av = (a.industry ?? "").toLowerCase(); bv = (b.industry ?? "").toLowerCase(); break;
+        case "confidence": av = a.confidence ?? 0; bv = b.confidence ?? 0; break;
+        case "contacts": av = contactCounts[a.id] ?? 0; bv = contactCounts[b.id] ?? 0; break;
+        case "lead_source": av = (a.lead_source ?? "").toLowerCase(); bv = (b.lead_source ?? "").toLowerCase(); break;
+        case "owner": av = (a.assigned_email ?? "").toLowerCase(); bv = (b.assigned_email ?? "").toLowerCase(); break;
+      }
+      if (av < bv) return sort.dir === "asc" ? -1 : 1;
+      if (av > bv) return sort.dir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [companies, q, stage, showArchived, sort, contactCounts]);
 
   const stats = useMemo(() => {
     const total = companies.length;
@@ -89,7 +112,13 @@ function Page() {
   }, [companies, contactCounts]);
 
   const fmtMoney = (n: number) => n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}K` : `${Math.round(n)}`;
-
+const cycleSort = (key: string) => {
+    setSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null; // third click clears
+    });
+  };
   async function bulkAssign(email: string) {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
@@ -171,10 +200,10 @@ function Page() {
         </div>
       )}
 
-      {view === "table" && <CompanyTable items={filtered} contactCounts={contactCounts} selected={selected} onToggle={(id) => {
+      {view === "table" && <CompanyTable items={filtered} contactCounts={contactCounts} sort={sort} onSort={cycleSort} selected={selected} onToggle={(id) => {
         const next = new Set(selected); next.has(id) ? next.delete(id) : next.add(id); setSelected(next);
       }} onToggleAll={() => setSelected(selected.size === filtered.length ? new Set() : new Set(filtered.map((c) => c.id)))} />}
-        {view === "industry" && <IndustryView items={filtered} />}
+       {view === "industry" && <IndustryView items={filtered} />}
       {view === "confidence" && <ConfidenceView items={filtered} />}
     </div>
   );
@@ -189,25 +218,32 @@ function Stat({ label, value, sublabel, accent }: { label: string; value: React.
     </div>
   );
 }
-
-function CompanyTable({ items, contactCounts, selected, onToggle, onToggleAll }: { items: Company[]; contactCounts: Record<string, number>; selected: Set<string>; onToggle: (id: string) => void; onToggleAll: () => void }) {
-const allSelected = items.length > 0 && items.every((c) => selected.has(c.id));
+function CompanyTable({ items, contactCounts, sort, onSort, selected, onToggle, onToggleAll }: { items: Company[]; contactCounts: Record<string, number>; sort: { key: string; dir: "asc" | "desc" } | null; onSort: (key: string) => void; selected: Set<string>; onToggle: (id: string) => void; onToggleAll: () => void }) {
+  const allSelected = items.length > 0 && items.every((c) => selected.has(c.id));
+  const SortableTh = ({ k, label }: { k: string; label: string }) => (
+    <th className="px-4 py-3 text-left">
+      <button onClick={() => onSort(k)} className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-foreground transition-colors">
+        {label}
+        {sort?.key === k && (sort.dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+      </button>
+    </th>
+  );
   return (
     <div className="qitt-card overflow-x-auto">
       <table className="w-full text-sm min-w-[900px]">
-       <thead className="text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
+        <thead className="text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
           <tr>
             <th className="px-3 py-3 w-8"><Checkbox checked={allSelected} onCheckedChange={onToggleAll} /></th>
-            <th className="px-4 py-3 text-left">Stage</th>
-            <th className="px-4 py-3 text-left">Company</th>
-            <th className="px-4 py-3 text-left">Added</th>
-            <th className="px-4 py-3 text-left">Location</th>
-            <th className="px-4 py-3 text-left">Industry</th>
+            <SortableTh k="stage" label="Stage" />
+            <SortableTh k="company" label="Company" />
+            <SortableTh k="added" label="Added" />
+            <SortableTh k="location" label="Location" />
+            <SortableTh k="industry" label="Industry" />
             <th className="px-4 py-3 text-left">Products</th>
-            <th className="px-4 py-3 text-left">Confidence</th>
-            <th className="px-4 py-3 text-left">Contacts</th>
-            <th className="px-4 py-3 text-left">Lead Source</th>
-            <th className="px-4 py-3 text-left">Owner</th>
+            <SortableTh k="confidence" label="Confidence" />
+            <SortableTh k="contacts" label="Contacts" />
+            <SortableTh k="lead_source" label="Lead Source" />
+            <SortableTh k="owner" label="Owner" />
           </tr>
         </thead>
         <tbody>
