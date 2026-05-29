@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowLeft, ChevronDown, ChevronRight, Copy, RefreshCw, MessageSquare, Activity as ActIcon, History, Plus, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Copy, RefreshCw, MessageSquare, Activity as ActIcon, History, Plus, Pencil, Trash2, Archive, RotateCcw } from "lucide-react";
 import { cn, fmtDate } from "@/lib/utils";
 import { toast } from "sonner";
 import { rerunResearchForCompany } from "@/lib/mock-pipeline";
@@ -114,7 +114,22 @@ function Page() {
             <div className="text-sm text-muted-foreground mt-1">{company.location} · {company.industry ?? "—"}</div>
             <div className="mt-3"><ConfidenceBar value={company.confidence ?? 0} /></div>
           </div>
-          <Button size="sm" variant="outline" onClick={rerun} disabled={busy}><RefreshCw className={cn("h-3 w-3 mr-1", busy && "animate-spin")} />Re-run research</Button>
+<Button size="sm" variant="outline" onClick={rerun} disabled={busy}><RefreshCw className={cn("h-3 w-3 mr-1", busy && "animate-spin")} />Re-run research</Button>
+          {company.archived ? (
+            <Button size="sm" variant="outline" onClick={async () => {
+              const { error } = await supabase.from("companies").update({ archived: false, archived_date: null }).eq("id", company.id);
+              if (error) { toast.error(`Restore failed: ${error.message}`); return; }
+              rc();
+              toast.success("Restored.");
+            }}><RotateCcw className="h-3 w-3 mr-1" />Restore</Button>
+          ) : (
+            <Button size="sm" variant="outline" onClick={async () => {
+              const { error } = await supabase.from("companies").update({ archived: true, archived_date: new Date().toISOString() }).eq("id", company.id);
+              if (error) { toast.error(`Archive failed: ${error.message}`); return; }
+              rc();
+              toast.success("Archived.");
+            }}><Archive className="h-3 w-3 mr-1" />Archive</Button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Download, Users, ArrowRightLeft } from "lucide-react";
+import { Download, Users, ArrowRightLeft, Archive } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/opportunities")({ component: Page });
 
@@ -41,14 +41,17 @@ function Page() {
   const [stage, setStage] = useState<string>("all");
   const [view, setView] = useState<"table" | "industry" | "confidence">("table");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showArchived, setShowArchived] = useState(false);
 
   const filtered = useMemo(() => {
     return companies.filter((c) => {
+      if (!showArchived && c.archived) return false;
+      if (showArchived && !c.archived) return false;
       if (stage !== "all" && c.stage !== stage) return false;
       if (q && ![c.name, c.location, c.industry].some((x) => (x ?? "").toLowerCase().includes(q.toLowerCase()))) return false;
       return true;
     });
-  }, [companies, q, stage]);
+  }, [companies, q, stage, showArchived]);
 
   const stats = useMemo(() => {
     const total = companies.length;
@@ -133,7 +136,11 @@ function Page() {
           </SelectContent>
         </Select>
         <Button size="sm" variant="outline" onClick={exportCsv}><Download className="h-3 w-3 mr-1" />Export CSV</Button>
-        <div className="ml-auto flex rounded-md border border-border overflow-hidden text-xs">
+        <Button size="sm" variant={showArchived ? "default" : "outline"} onClick={() => setShowArchived(s => !s)}>
+          <Archive className="h-3 w-3 mr-1" />
+          {showArchived ? "Showing archived" : "Show archived"}
+        </Button>
+      <div className="ml-auto flex rounded-md border border-border overflow-hidden text-xs">
           {(["table","industry","confidence"] as const).map((v) => (
             <button key={v} onClick={() => setView(v)} className={cn("px-3 py-1.5", view === v ? "bg-accent/15 text-accent" : "text-muted-foreground hover:bg-muted")}>{v}</button>
           ))}

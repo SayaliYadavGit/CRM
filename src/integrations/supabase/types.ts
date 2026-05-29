@@ -87,6 +87,8 @@ export type Database = {
         Row: {
           ai_readiness: string | null
           ai_recommendation: string | null
+          archived: boolean
+          archived_date: string | null
           assigned_email: string | null
           confidence: number | null
           created_at: string
@@ -114,6 +116,8 @@ export type Database = {
         Insert: {
           ai_readiness?: string | null
           ai_recommendation?: string | null
+          archived?: boolean
+          archived_date?: string | null
           assigned_email?: string | null
           confidence?: number | null
           created_at?: string
@@ -141,6 +145,8 @@ export type Database = {
         Update: {
           ai_readiness?: string | null
           ai_recommendation?: string | null
+          archived?: boolean
+          archived_date?: string | null
           assigned_email?: string | null
           confidence?: number | null
           created_at?: string
