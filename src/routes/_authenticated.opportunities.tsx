@@ -2,7 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { STAGES, STAGE_LABEL, STAGE_TONE, STAGE_PROBABILITY, TEAM, confidenceTone, type Company, type Stage } from "@/lib/types";
+import { STAGES, STAGE_LABEL, STAGE_TONE, STAGE_PROBABILITY, confidenceTone, type Company, type Stage } from "@/lib/types";
+import { useAssignableUsers } from "@/lib/use-assignable-users";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { Download, Users, ArrowRightLeft, Archive } from "lucide-react";
 export const Route = createFileRoute("/_authenticated/opportunities")({ component: Page });
 
 function Page() {
+  const { data: assignableUsers = [] } = useAssignableUsers();
   const { data: companies = [], refetch } = useQuery({
     queryKey: ["companies"],
     queryFn: async (): Promise<Company[]> => {
@@ -21,6 +23,7 @@ function Page() {
       return data ?? [];
     },
   });
+
 
   const { data: contactCounts = {} } = useQuery({
     queryKey: ["contact-counts"],
@@ -154,7 +157,7 @@ function Page() {
             <Users className="h-3 w-3 text-muted-foreground" />
             <Select onValueChange={bulkAssign}>
               <SelectTrigger className="h-8 w-52"><SelectValue placeholder="Reassign owner…" /></SelectTrigger>
-              <SelectContent>{TEAM.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}</SelectContent>
+              <SelectContent>{assignableUsers.map((u) => <SelectItem key={u.email} value={u.email}>{u.email}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="flex items-center gap-2">

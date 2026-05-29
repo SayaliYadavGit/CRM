@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { STAGES, STAGE_LABEL, canTransition, type Activity, type Company, type Contact, type Outreach, type OutreachOrder, type Stage, TEAM } from "@/lib/types";
+import { STAGES, STAGE_LABEL, canTransition, type Activity, type Company, type Contact, type Outreach, type OutreachOrder, type Stage } from "@/lib/types";
+import { useAssignableUsers } from "@/lib/use-assignable-users";
 import { StageBadge, ConfidenceBar } from "./_authenticated.opportunities";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,8 +19,9 @@ import { rerunResearchForCompany } from "@/lib/mock-pipeline";
 export const Route = createFileRoute("/_authenticated/companies/$companyId")({ component: Page });
 
 function Page() {
-  const { companyId } = Route.useParams();
+const { companyId } = Route.useParams();
   const { user } = useAuth();
+  const { data: assignableUsers = [] } = useAssignableUsers();
 
   const { data: company, refetch: rc } = useQuery({
     queryKey: ["company", companyId],
@@ -147,7 +149,7 @@ function Page() {
             <span className="text-xs uppercase tracking-wider text-muted-foreground">Owner</span>
             <Select value={company.assigned_email ?? ""} onValueChange={setAssignee}>
               <SelectTrigger className="h-8 w-56"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-              <SelectContent>{TEAM.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}</SelectContent>
+<SelectContent>{assignableUsers.map((u) => <SelectItem key={u.email} value={u.email}>{u.email}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="flex items-center gap-2">
