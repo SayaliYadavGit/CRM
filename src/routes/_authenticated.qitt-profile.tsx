@@ -65,7 +65,12 @@ function Page() {
             {archived.map((p) => (
               <div key={p.id} className="qitt-card p-3 flex items-center justify-between">
                 <div><div className="font-medium">{p.name}</div><div className="text-xs text-muted-foreground">Archived {p.archived_date ? new Date(p.archived_date).toLocaleDateString() : ""}</div></div>
-                <Button size="sm" variant="ghost" onClick={async () => { await supabase.from("products").update({ archived: false, archived_date: null }).eq("id", p.id); rpr(); toast.success("Restored."); }}>
+<Button size="sm" variant="ghost" onClick={async () => {
+                  const { error } = await supabase.from("products").update({ archived: false, archived_date: null }).eq("id", p.id);
+                  if (error) { toast.error(`Restore failed: ${error.message}`); return; }
+                  rpr();
+                  toast.success("Restored.");
+                }}>
                   <RotateCcw className="h-4 w-4 mr-1" />Restore
                 </Button>
               </div>
@@ -108,7 +113,8 @@ function ProfileCard({ profile, onSaved }: { profile: Profile; onSaved: () => vo
         </div>
         <Button variant="ghost" size="sm" onClick={async () => {
           if (edit) {
-            await supabase.from("profile").update(draft).eq("id", profile.id);
+            const { error } = await supabase.from("profile").update(draft).eq("id", profile.id);
+            if (error) { toast.error(`Save failed: ${error.message}`); return; }
             toast.success("Saved."); onSaved();
           }
           setEdit((e) => !e);
@@ -178,14 +184,16 @@ function ProductCard({ product, onEdit, onChanged }: { product: Product; onEdit:
             <Button size="sm" onClick={async () => {
               if (!note.trim()) return;
               const stamp = `${new Date().toLocaleDateString()} — ${note}`;
-              await supabase.from("products").update({ notes: [...(product.notes ?? []), stamp] }).eq("id", product.id);
+              const { error } = await supabase.from("products").update({ notes: [...(product.notes ?? []), stamp] }).eq("id", product.id);
+              if (error) { toast.error(`Add note failed: ${error.message}`); return; }
               setNote(""); onChanged();
             }}>Add</Button>
           </div>
           <div className="flex gap-2 pt-2 border-t border-border">
             <Button size="sm" variant="outline" onClick={onEdit}><Pencil className="h-3 w-3 mr-1" />Edit</Button>
             <Button size="sm" variant="ghost" onClick={async () => {
-              await supabase.from("products").update({ archived: true, archived_date: new Date().toISOString() }).eq("id", product.id);
+              const { error } = await supabase.from("products").update({ archived: true, archived_date: new Date().toISOString() }).eq("id", product.id);
+              if (error) { toast.error(`Archive failed: ${error.message}`); return; }
               onChanged(); toast.success("Archived.");
             }}><Archive className="h-3 w-3 mr-1" />Archive</Button>
           </div>
@@ -221,9 +229,12 @@ function ProductDialog({ product, onClose, onSaved }: { product: Product | null;
             const split = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
             const payload = { name: draft.name, subtitle: draft.subtitle, what: draft.what, who: draft.who,
               capabilities: split(draft.capabilities), problems: split(draft.problems), differentiators: split(draft.differentiators) };
-            if (product) await supabase.from("products").update(payload).eq("id", product.id);
-            else await supabase.from("products").insert(payload);
-            toast.success("Saved."); onSaved();
+            const { error } = product
+              ? await supabase.from("products").update(payload).eq("id", product.id)
+              : await supabase.from("products").insert(payload);
+            if (error) { toast.error(`Save failed: ${error.message}`); return; }
+            toast.success("Saved.");
+            onSaved();
           }}>Save</Button>
         </DialogFooter>
       </DialogContent>
