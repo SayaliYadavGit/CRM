@@ -10,8 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn, fmtRelative } from "@/lib/utils";
 import { toast } from "sonner";
-import { Download, Users, ArrowRightLeft, Archive, ChevronUp, ChevronDown } from "lucide-react";
-
+import { Download, Users, ArrowRightLeft, Archive, ChevronUp, ChevronDown, SlidersHorizontal } from "lucide-react";
 export const Route = createFileRoute("/_authenticated/opportunities")({ component: Page });
 
 function Page() {
@@ -46,13 +45,18 @@ const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [productFilter, setProductFilter] = useState<Set<string>>(new Set());
+  const [ownerFilter, setOwnerFilter] = useState<string>("all");
 
- const filtered = useMemo(() => {
+const filtered = useMemo(() => {
     const list = companies.filter((c) => {
       if (!showArchived && c.archived) return false;
       if (showArchived && !c.archived) return false;
       if (stage !== "all" && c.stage !== stage) return false;
       if (q && ![c.name, c.location, c.industry].some((x) => (x ?? "").toLowerCase().includes(q.toLowerCase()))) return false;
+      if (productFilter.size > 0 && !(c.relevant_products ?? []).some((p) => productFilter.has(p))) return false;
+      if (ownerFilter !== "all" && c.assigned_email !== ownerFilter) return false;
       return true;
     });
 
@@ -77,8 +81,7 @@ const [q, setQ] = useState("");
       return 0;
     });
     return sorted;
-  }, [companies, q, stage, showArchived, sort, contactCounts]);
-
+}, [companies, q, stage, showArchived, sort, contactCounts, productFilter, ownerFilter]);
   const stats = useMemo(() => {
     const total = companies.length;
     const avg = total ? Math.round(companies.reduce((s, c) => s + (c.confidence ?? 0), 0) / total) : 0;
@@ -118,6 +121,26 @@ const cycleSort = (key: string) => {
       if (prev.dir === "asc") return { key, dir: "desc" };
       return null; // third click clears
     });
+  };
+  const allProducts = useMemo(() => {
+    const set = new Set<string>();
+    companies.forEach((c) => (c.relevant_products ?? []).forEach((p) => set.add(p)));
+    return Array.from(set).sort();
+  }, [companies]);
+
+  const activeFilterCount = (productFilter.size > 0 ? 1 : 0) + (ownerFilter !== "all" ? 1 : 0);
+
+  const toggleProduct = (p: string) => {
+    setProductFilter((prev) => {
+      const next = new Set(prev);
+      next.has(p) ? next.delete(p) : next.add(p);
+      return next;
+    });
+  };
+
+  const clearFilters = () => {
+    setProductFilter(new Set());
+    setOwnerFilter("all");
   };
   async function bulkAssign(email: string) {
     const ids = Array.from(selected);
@@ -168,6 +191,10 @@ const cycleSort = (key: string) => {
           </SelectContent>
         </Select>
         <Button size="sm" variant="outline" onClick={exportCsv}><Download className="h-3 w-3 mr-1" />Export CSV</Button>
+        <Button size="sm" variant={filtersOpen || activeFilterCount > 0 ? "default" : "outline"} onClick={() => setFiltersOpen((o) => !o)}>
+          <SlidersHorizontal className="h-3 w-3 mr-1" />
+          Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+        </Button>
         <Button size="sm" variant={showArchived ? "default" : "outline"} onClick={() => setShowArchived(s => !s)}>
           <Archive className="h-3 w-3 mr-1" />
           {showArchived ? "Showing archived" : "Show archived"}
@@ -178,7 +205,52 @@ const cycleSort = (key: string) => {
           ))}
         </div>
       </div>
-
+      {filtersOpen && (
+        <div className="qitt-card p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium">Filters</h3>
+            {activeFilterCount > 0 && (
+              <Button size="sm" variant="ghost" onClick={clearFilters}>Clear all</Button>
+            )}
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Products</div>
+              <div className="flex flex-wrap gap-2">
+                {allProducts.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => toggleProduct(p)}
+                    className={cn(
+                      "text-xs px-3 py-1.5 rounded border transition-colors",
+                      productFilter.has(p)
+                        ? "bg-accent text-accent-foreground border-accent"
+                        : "border-border text-muted-foreground hover:border-accent/50 hover:text-foreground"
+                    )}
+                  >
+                    {p}
+                  </button>
+                ))}
+                {allProducts.length === 0 && (
+                  <span className="text-xs text-muted-foreground">No products yet.</span>
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Owner</div>
+              <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All owners</SelectItem>
+                  {assignableUsers.map((u) => (
+                    <SelectItem key={u.email} value={u.email}>{u.email}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+      )}
       {selected.size > 0 && (
         <div className="qitt-card p-3 flex flex-wrap items-center gap-3 text-sm border-accent/40">
           <span className="font-medium">{selected.size} selected</span>
